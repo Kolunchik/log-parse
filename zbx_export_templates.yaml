@@ -1,0 +1,239 @@
+zabbix_export:
+  version: '7.2'
+  template_groups:
+    - uuid: 0e85f601c04d44aab171b49f61c986a9
+      name: Templates/Custom
+  templates:
+    - uuid: ac6f34b04ef741ae8384260175da2c38
+      template: 'Template Module net.log'
+      name: 'Template Module net.log'
+      groups:
+        - name: Templates/Custom
+      items:
+        - uuid: 875025cea630421a8e7b7b555d29def6
+          name: 'Лог с устройства'
+          type: TRAP
+          key: net.log
+          history: 2w
+          value_type: LOG
+          logtimefmt: 'yyyy-MM-ddThh:mm:ss'
+          preprocessing:
+            - type: REGEX
+              parameters:
+                - '^\S+\s(.*)$'
+                - \1
+          tags:
+            - tag: file
+              value: 'net log'
+          triggers:
+            - uuid: 8daed0c3bfc24e3bbbef09ac5b1eab3f
+              expression: 'nodata(/Template Module net.log/net.log,15m)=0 and find(/Template Module net.log/net.log,,"iregexp","Fan.*failed")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'nodata(/Template Module net.log/net.log,15m)=1'
+              name: 'Вентилятор не работает'
+              status: DISABLED
+              priority: WARNING
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: fan
+            - uuid: f415e08fdb8c4312ba2be456085fae55
+              expression: 'nodata(/Template Module net.log/net.log,15m)=0 and find(/Template Module net.log/net.log,,"iregexp","temperature.*enter alarm state")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'nodata(/Template Module net.log/net.log,15m)=1 or find(/Template Module net.log/net.log,,"iregexp","temperature.*recovers to normal state")=1'
+              name: 'Градусник в тревоге'
+              status: DISABLED
+              priority: WARNING
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: temperature
+            - uuid: a5d51ec2e1fe466bb95c81fd85ebb82a
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","Internal Power failed")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","Internal Power is recovered")=1 or find(/Template Module net.log/net.log,,"iregexp","System started up")=1'
+              name: 'Коммутатор работает на батарейке'
+              status: DISABLED
+              priority: WARNING
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: power
+            - uuid: ac191f83a85246338fefdcd21c5ce86e
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","is under attack by")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","detection restarted")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Кто-то прикидывается шлюзом'
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: spoofing
+                - tag: ip
+                  value: '{{ITEM.VALUE}.regsub("^Gateway ([.\d]+).*([\-A-F\d]{17}) from ([\d]+).","\1")}'
+                - tag: mac
+                  value: '{{ITEM.VALUE}.regsub("^Gateway ([.\d]+).*([\-A-F\d]{17}) from ([\d]+).","\2")}'
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^Gateway ([.\d]+).*([\-A-F\d]{17}) from ([\d]+).","\3")}'
+            - uuid: b025113b606d42538669dce54f42310b
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","Line protocol on Interface EPON0\\/., changed state to down")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","Line protocol on Interface EPON0\\/., changed state to up")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Нет активных онушек'
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: bdcom
+                - tag: error
+                  value: gepon
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+(EPON0\/[0-9]+)","\1")}'
+            - uuid: 4357ecf7752849c2b6761990b8ca1db2
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","LBD detects loopback on")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","LBD recovers ")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Петля, порт отключен'
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: edgecore
+                - tag: error
+                  value: loop
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+(?:port |Eth 1\/)([0-9]+)","\1")}'
+            - uuid: c7a7a805c1e74b3580277ec0ca141a1c
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","LOOPBACK_DETEC")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","changed state to up")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Петля, порт отключен'
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: error
+                  value: loop
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+thernet1\/0\/([0-9]+)","\1")}'
+                - tag: snr
+            - uuid: 700b06dd1abf472d9fa5f8f899506b2d
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","loop occurred")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","detection restarted")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Петля, порт отключен'
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: loop
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+ort[\s:<]*([0-9:]+)","\1")}'
+            - uuid: 43f7c9c7ab144641828e268691bfaf0a
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","optic module.*exceed")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","optic module.*(?:normal|recover)")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Проблемы с оптической линией'
+              status: DISABLED
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: ddm
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+ort[\s:<]*([0-9:]+)","\1")}'
+            - uuid: 9204e9158c684e09839e9508772034f1
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","transceiver.*event")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: '(find(/Template Module net.log/net.log,,"iregexp","changed state to up")=1)'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Проблемы с оптической линией'
+              status: DISABLED
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: error
+                  value: ddm
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+thernet1\/0\/([0-9]+)","\1")}'
+                - tag: snr
+            - uuid: 35d78a5628f54f7f8f11eba6755674fc
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","detected untrusted dhcp")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Работает вражеский DHCP-сервер'
+              status: DISABLED
+              priority: INFO
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: dhcp
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+ort[\s:<]*([0-9:]+)","\1")}'
+            - uuid: d6eb5d44c5534daeabc40bd69b20cb68
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","Alarm LASER_ALWAYS_ON from")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","Line protocol on Interface EPON0\\/., changed state to up")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: 'Тревога LASER_ALWAYS_ON'
+              status: DISABLED
+              priority: WARNING
+              description: 'OLT (пончик) думает, что эта линия засвечена сошедшей с ума онушкой или какой-то пидор светит ethernet-медиаконвертером в gpon-дерево. Ищется тяжело, путём отключения веток по очереди и усердного моления.'
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: bdcom
+                - tag: error
+                  value: gepon
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+(EPON0\/[0-9]+)","\1")}'
+            - uuid: 8c3f3d3f15074cd89d4e86eeb9cbf019
+              expression: 'find(/Template Module net.log/net.log,,"iregexp","storm.* occurr")=1'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'find(/Template Module net.log/net.log,,"iregexp","storm.*clear")=1'
+              correlation_mode: TAG_VALUE
+              correlation_tag: port
+              name: Шторм
+              priority: WARNING
+              type: MULTIPLE
+              manual_close: 'YES'
+              tags:
+                - tag: dlink
+                - tag: error
+                  value: storm
+                - tag: port
+                  value: '{{ITEM.VALUE}.regsub("^.+ort[\s:<]*([0-9:]+)","\1")}'
+      macros:
+        - macro: '{$DLINK_SW}'
+          value: '^(\S+)\s.+ort[\s:<]*([0-9:]+)'
+        - macro: '{$NODATA_CLOSE}'
+          value: '120'
+        - macro: '{$NODATA_OPEN}'
+          value: '60'
+        - macro: '{$SNR_SW}'
+          value: '^(\S+)\s.+thernet1\/0\/([0-9]+)'
