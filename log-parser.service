@@ -1,0 +1,12 @@
+[Unit]
+Description=parse and send logs to zabbix
+After=network.target auditd.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStart=/opt/log-parser -interval 30s
+
+[Install]
+WantedBy=multi-user.target

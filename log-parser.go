@@ -19,13 +19,14 @@ func line() string {
 }
 
 var opts struct {
-	pn    string
-	ln    string
-	key   string
-	zs    string
-	zp    int
-	buf   int
-	batch int
+	pn       string
+	ln       string
+	key      string
+	zs       string
+	zp       int
+	buf      int
+	batch    int
+	interval time.Duration
 }
 
 func parseFlags() {
@@ -36,6 +37,7 @@ func parseFlags() {
 	flag.IntVar(&opts.zp, "zabbix-port", 10051, "zabbix server port")
 	flag.IntVar(&opts.buf, "buffer-size", 64*1024, "read buffer size in bytes")
 	flag.IntVar(&opts.batch, "batch-size", 100, "max items per batch")
+	flag.DurationVar(&opts.interval, "interval", 0, "interval between iterations")
 	flag.Parse()
 }
 
@@ -158,9 +160,20 @@ func magic() error {
 	return nil
 }
 
+func scheduledMagick() {
+	for range time.Tick(opts.interval) {
+		if err := magic(); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
 func main() {
 	parseFlags()
 	if err := magic(); err != nil {
 		log.Fatal(err)
+	}
+	if opts.interval > 0 {
+		scheduledMagick()
 	}
 }
