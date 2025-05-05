@@ -33,6 +33,16 @@ func TestValidateLogLine(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "IPv6 address",
+			line: "2023-04-11T08:57:01.058999+03:00 2001:db8::1 message",
+			want: true,
+		},
+		{
+			name: "empty message",
+			line: "2023-04-11T08:57:01.058999+03:00 10.0.0.1 ",
+			want: true,
+		},
+		{
 			name: "invalid timestamp",
 			line: "invalid-time 10.77.2.11 message",
 			want: false,
@@ -205,34 +215,6 @@ func TestSendData(t *testing.T) {
 			err := sendData(&tt.data)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("sendData() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateLogLineEdgeCases(t *testing.T) {
-	tests := []struct {
-		name string
-		line string
-		want bool
-	}{
-		{
-			name: "IPv6 address",
-			line: "2023-04-11T08:57:01.058999+03:00 2001:db8::1 message",
-			want: true,
-		},
-		{
-			name: "empty message",
-			line: "2023-04-11T08:57:01.058999+03:00 10.0.0.1 ",
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parsed := strings.SplitN(tt.line, " ", 3)
-			if got := validateLogLine(&parsed); got != tt.want {
-				t.Errorf("validateLogLine() = %v, want %v", got, tt.want)
 			}
 		})
 	}
