@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kolunchik/zs"
 )
@@ -207,9 +209,169 @@ func TestSendData(t *testing.T) {
 	}
 }
 
-func TestMagick(t *testing.T) {
+// TestLargeFileProcessing проверяет обработку больших файлов
+func TestLargeFileProcessing(t *testing.T) {
 	parseFlags()
-	if err := magic(); err != nil {
-		t.Errorf("magic() returned unexpected result: %v", err)
+	// Сохраняем оригинальные значения
+	oldLn := opts.ln
+	oldPn := opts.pn
+	oldBatch := opts.batch
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+		opts.batch = oldBatch
+	}()
+
+	// Создаем временные файлы
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	// Генерируем большой файл (10010 строк)
+	var builder strings.Builder
+	for i := 0; i < 10010; i++ {
+		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d\n", i, i%256, i))
+	}
+
+	if _, err := tmpLog.WriteString(builder.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Устанавливаем тестовые параметры
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	opts.batch = 101 // Обрабатываем по 100 строк за раз
+
+	if err := magic(); err != nil {
+		t.Errorf("magic() with large file error = %v", err)
+	}
+}
+
+// TestMagicErrorCases проверяет обработку ошибок в magic()
+func TestMagicErrorCases(t *testing.T) {
+	// Сохраняем оригинальные значения
+	oldLn := opts.ln
+	oldPn := opts.pn
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+	}()
+
+	tests := []struct {
+		name    string
+		logPath string
+		posPath string
+		wantErr bool
+	}{
+		{
+			name:    "non-existent log file",
+			logPath: "/nonexistent/file",
+			wantErr: true,
+		},
+		{
+			name:    "invalid position file path",
+			logPath: os.DevNull,
+			posPath: "/invalid/path/to/position",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts.ln = tt.logPath
+			if tt.posPath != "" {
+				opts.pn = tt.posPath
+			}
+
+			if err := magic(); (err != nil) != tt.wantErr {
+				t.Errorf("magic() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestMagicFileOperations проверяет работу с файлами в magic()
+func TestMagicFileOperations(t *testing.T) {
+	// Сохраняем оригинальные значения
+	oldLn := opts.ln
+	oldPn := opts.pn
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+	}()
+
+	// Создаем временные файлы
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	// Записываем тестовые данные
+	testContent := "2023-04-11T08:57:01.058999+03:00 10.77.2.11 test message\n"
+	if _, err := tmpLog.WriteString(testContent); err != nil {
+		t.Fatal(err)
+	}
+
+	// Устанавливаем тестовые пути
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+
+	// Первый запуск - должен обработать весь файл
+	if err := magic(); err != nil {
+		t.Errorf("magic() first run error = %v", err)
+	}
+
+	// Проверяем содержимое позиционного файла
+	posContent, err := os.ReadFile(tmpPos.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posContent) == 0 {
+		t.Error("position file is empty after magic()")
+	}
+
+	// Второй запуск - не должен ничего обрабатывать (файл не изменился)
+	if err := magic(); err != nil {
+		t.Errorf("magic() second run error = %v", err)
+	}
+}
+
+// TestScheduledMagick проверяет работу планировщика
+func TestScheduledMagick(t *testing.T) {
+	oldInterval := opts.interval
+	defer func() { opts.interval = oldInterval }()
+
+	opts.interval = time.Millisecond * 100
+	counter := 0
+	f := func() {
+		counter++
+		if counter >= 3 {
+			panic("stop") // Это остановит тест после 3 итераций
+		}
+	}
+
+	defer func() {
+		if r := recover(); r != nil && r.(string) == "stop" {
+			if counter != 3 {
+				t.Errorf("scheduledMagick() ran %d times, want 3", counter)
+			}
+		}
+	}()
+
+	scheduledMagick(f)
 }
