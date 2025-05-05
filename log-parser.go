@@ -115,65 +115,66 @@ func processLogFile(logfile *os.File) error {
 }
 
 func magic() error {
-	logfile, err := os.Open(opts.ln)
+	logFile, err := os.Open(opts.ln)
 	if err != nil {
 		return fmt.Errorf("Failed to open log file: %v", err)
 	}
-	defer logfile.Close()
-	logfilestat, err := logfile.Stat()
+	defer logFile.Close()
+	logStat, err := logFile.Stat()
 	if err != nil {
 		return fmt.Errorf("Failed to get log file stats: %v", err)
 	}
-	posfile, err := os.OpenFile(opts.pn, os.O_RDWR|os.O_CREATE, 0644)
+	posFile, err := os.OpenFile(opts.pn, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return fmt.Errorf("Failed to open position file: %v", err)
 	}
-	defer posfile.Close()
-	var position int64
-	if _, err := fmt.Fscanf(posfile, "%d", &position); err != nil || position > logfilestat.Size() {
+	defer posFile.Close()
+	var position, ts int64
+	if _, err := fmt.Fscanf(posFile, "%d %d", &position, &ts); err != nil || position > logStat.Size() {
 		position = 0
 	}
-	log.Printf("Position %v, logfile size %v, date %v", position, logfilestat.Size(), logfilestat.ModTime())
-	if _, err = logfile.Seek(position, io.SeekStart); err != nil {
+	if ts == logStat.ModTime().UnixNano() {
+		return nil
+	}
+	log.Printf("Position %v, logfile size %v, date %v", position, logStat.Size(), logStat.ModTime())
+	if _, err = logFile.Seek(position, io.SeekStart); err != nil {
 		return fmt.Errorf("Failed to seek log file: %v", err)
 	}
-	if err := processLogFile(logfile); err != nil {
+	if err := processLogFile(logFile); err != nil {
 		return fmt.Errorf("Log processing failed: %v", err)
 	}
-	lastposition, err := logfile.Seek(0, io.SeekCurrent)
+	currentPosition, err := logFile.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return fmt.Errorf("Failed to get current position: %v", err)
 	}
-	if position == lastposition {
-		return nil
-	}
-	if err := posfile.Truncate(0); err != nil {
+	if err := posFile.Truncate(0); err != nil {
 		return fmt.Errorf("Failed to truncate position file: %v", err)
 	}
-	if _, err := posfile.Seek(0, io.SeekStart); err != nil {
+	if _, err := posFile.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("Failed to seek position file: %v", err)
 	}
-	if _, err := fmt.Fprintf(posfile, "%d", lastposition); err != nil {
+	if _, err := fmt.Fprintf(posFile, "%d %d", currentPosition, logStat.ModTime().UnixNano()); err != nil {
 		return fmt.Errorf("Failed to write position: %v", err)
 	}
-	log.Printf("New position saved: %d", lastposition)
+	log.Printf("New position saved: %d", currentPosition)
 	return nil
 }
 
-func scheduledMagick() {
+func scheduledMagick(f func()) {
 	for range time.Tick(opts.interval) {
-		if err := magic(); err != nil {
-			log.Fatal(err)
-		}
+		f()
 	}
 }
 
 func main() {
 	parseFlags()
-	if err := magic(); err != nil {
-		log.Fatal(err)
+	f := func() {
+		if err := magic(); err != nil {
+			log.Fatal(err)
+		}
 	}
+	f()
 	if opts.interval > 0 {
-		scheduledMagick()
+		scheduledMagick(f)
 	}
 }

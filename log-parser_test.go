@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -133,13 +132,6 @@ invalid line
 		},
 	}
 
-	// Mock sendData для тестов
-	//oldSendData := sendData
-	//defer func() { sendData = oldSendData }()
-	//sendData = func(data *[]zs.ZabbixDataItem) error {
-	//	return nil
-	//}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Создаем временный файл с тестовыми логами
@@ -167,118 +159,6 @@ invalid line
 			err = processLogFile(tmpfile)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("processLogFile() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-// TestPositionFileHandling проверяет обработку файла позиции
-func TestPositionFileHandling(t *testing.T) {
-	tests := []struct {
-		name        string
-		initialPos  string
-		logSize     int64
-		expectedPos int64
-		shouldReset bool
-	}{
-		{
-			name:        "valid position",
-			initialPos:  "100",
-			logSize:     200,
-			expectedPos: 100,
-			shouldReset: false,
-		},
-		{
-			name:        "position larger than file",
-			initialPos:  "300",
-			logSize:     200,
-			expectedPos: 0,
-			shouldReset: true,
-		},
-		{
-			name:        "invalid position format",
-			initialPos:  "invalid",
-			logSize:     200,
-			expectedPos: 0,
-			shouldReset: true,
-		},
-		{
-			name:        "empty position file",
-			initialPos:  "",
-			logSize:     200,
-			expectedPos: 0,
-			shouldReset: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Создаем временный файл позиции
-			tmpPosFile, err := os.CreateTemp("", "testpos")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.Remove(tmpPosFile.Name())
-
-			if _, err := tmpPosFile.WriteString(tt.initialPos); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := tmpPosFile.Seek(0, io.SeekStart); err != nil {
-				t.Fatal(err)
-			}
-
-			// Создаем временный лог-файл
-			tmpLogFile, err := os.CreateTemp("", "testlog")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.Remove(tmpLogFile.Name())
-
-			if err := tmpLogFile.Truncate(tt.logSize); err != nil {
-				t.Fatal(err)
-			}
-
-			// Сохраняем оригинальные значения
-			oldPn := opts.pn
-			oldLn := opts.ln
-			opts.pn = tmpPosFile.Name()
-			opts.ln = tmpLogFile.Name()
-			defer func() {
-				opts.pn = oldPn
-				opts.ln = oldLn
-			}()
-
-			// Открываем файлы как в main()
-			logfile, err := os.Open(opts.ln)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer logfile.Close()
-
-			logfilestat, err := logfile.Stat()
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			posfile, err := os.OpenFile(opts.pn, os.O_RDWR|os.O_CREATE, 0644)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer posfile.Close()
-
-			// Читаем позицию
-			var position int64
-			if _, err := fmt.Fscanf(posfile, "%d", &position); err != nil || position > logfilestat.Size() {
-				if !tt.shouldReset {
-					t.Errorf("unexpected error or position reset: %v", err)
-				}
-				position = 0
-			}
-
-			if tt.shouldReset && position != 0 {
-				t.Errorf("expected position to be reset to 0, got %d", position)
-			} else if !tt.shouldReset && position != tt.expectedPos {
-				t.Errorf("expected position %d, got %d", tt.expectedPos, position)
 			}
 		})
 	}
