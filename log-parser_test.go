@@ -266,7 +266,7 @@ func TestLargeFileProcessing(t *testing.T) {
 
 	// Генерируем большой файл (10010 строк)
 	var builder strings.Builder
-	for i := 0; i < 10010; i++ {
+	for i := range 10010 {
 		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d\n", i, i%256, i))
 	}
 
@@ -380,8 +380,8 @@ func TestMagicFileOperations(t *testing.T) {
 	}
 }
 
-// TestScheduledMagick проверяет работу планировщика
-func TestScheduledMagick(t *testing.T) {
+// TestScheduledMagic проверяет работу планировщика
+func TestScheduledMagic(t *testing.T) {
 	oldInterval := opts.interval
 	defer func() { opts.interval = oldInterval }()
 
@@ -397,35 +397,54 @@ func TestScheduledMagick(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil && r.(string) == "stop" {
 			if counter != 3 {
-				t.Errorf("scheduledMagick() ran %d times, want 3", counter)
+				t.Errorf("scheduledMagic() ran %d times, want 3", counter)
 			}
 		}
 	}()
 
-	scheduledMagick(f)
+	scheduledMagic(f)
 }
 
 func TestMagicConcurrent(t *testing.T) {
-	oldLn := opts.ln
-	defer func() { opts.ln = oldLn }()
-
-	tmpLog, err := os.CreateTemp("", "concurrent_log")
+	tmpLog, err := os.CreateTemp("", "concurrent_test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(tmpLog.Name())
 
-	opts.ln = tmpLog.Name()
+	tmpPos, err := os.CreateTemp("", "concurrent_pos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
 
+	// Пишем тестовые данные
+	_, _ = tmpLog.WriteString("2023-01-01T00:00:00Z 127.0.0.1 test\n")
+
+	// Подменяем глобальные настройки
+	oldLn, oldPn := opts.ln, opts.pn
+	opts.ln, opts.pn = tmpLog.Name(), tmpPos.Name()
+	defer func() { opts.ln, opts.pn = oldLn, oldPn }()
+
+	// Запускаем 10 горутин
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := magic(); err != nil {
-				t.Errorf("magic() error in goroutine: %v", err)
+				t.Errorf("magic() failed: %v", err)
 			}
 		}()
 	}
 	wg.Wait()
+
+	// Проверяем, что позиция записана корректно
+	posData, err := os.ReadFile(tmpPos.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posData) == 0 {
+		t.Error("position file is empty after concurrent access")
+	}
 }

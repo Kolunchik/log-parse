@@ -165,7 +165,7 @@ func magic() error {
 	return nil
 }
 
-func scheduledMagick(f func()) {
+func scheduledMagic(f func()) {
 	for range time.Tick(opts.interval) {
 		f()
 	}
@@ -180,6 +180,6 @@ func main() {
 	}
 	f()
 	if opts.interval > 0 {
-		scheduledMagick(f)
+		scheduledMagic(f)
 	}
 }
