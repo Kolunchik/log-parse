@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kolunchik/zs"
@@ -28,6 +29,8 @@ var opts struct {
 	batch    int
 	interval time.Duration
 }
+
+var magicLock sync.Mutex
 
 func parseFlags() {
 	flag.StringVar(&opts.pn, "posname", "/var/tmp/log-parser.txt", "file to store position")
@@ -115,6 +118,8 @@ func processLogFile(logfile *os.File) error {
 }
 
 func magic() error {
+	magicLock.Lock()
+	defer magicLock.Unlock()
 	logFile, err := os.Open(opts.ln)
 	if err != nil {
 		return fmt.Errorf("Failed to open log file: %v", err)

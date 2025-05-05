@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,6 +210,34 @@ func TestSendData(t *testing.T) {
 	}
 }
 
+func TestValidateLogLineEdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{
+			name: "IPv6 address",
+			line: "2023-04-11T08:57:01.058999+03:00 2001:db8::1 message",
+			want: true,
+		},
+		{
+			name: "empty message",
+			line: "2023-04-11T08:57:01.058999+03:00 10.0.0.1 ",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed := strings.SplitN(tt.line, " ", 3)
+			if got := validateLogLine(&parsed); got != tt.want {
+				t.Errorf("validateLogLine() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLargeFileProcessing проверяет обработку больших файлов
 func TestLargeFileProcessing(t *testing.T) {
 	parseFlags()
@@ -374,4 +403,29 @@ func TestScheduledMagick(t *testing.T) {
 	}()
 
 	scheduledMagick(f)
+}
+
+func TestMagicConcurrent(t *testing.T) {
+	oldLn := opts.ln
+	defer func() { opts.ln = oldLn }()
+
+	tmpLog, err := os.CreateTemp("", "concurrent_log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	opts.ln = tmpLog.Name()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := magic(); err != nil {
+				t.Errorf("magic() error in goroutine: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
 }
