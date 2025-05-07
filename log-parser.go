@@ -33,9 +33,9 @@ var opts struct {
 var magicLock sync.Mutex
 
 func parseFlags() {
-	flag.StringVar(&opts.pn, "posname", "/var/tmp/log-parser.txt", "file to store position")
-	flag.StringVar(&opts.ln, "logname", "/var/log/net.log", "path to logfile")
-	flag.StringVar(&opts.key, "key", "net.log", "key for zabbix trapper")
+	flag.StringVar(&opts.pn, "posfile", "/var/tmp/log-parser.txt", "file to store position")
+	flag.StringVar(&opts.ln, "logfile", "/var/log/net.log", "path to logfile")
+	flag.StringVar(&opts.key, "zabbix-key", "net.log", "key for zabbix trapper")
 	flag.StringVar(&opts.zs, "zabbix-server", "127.0.0.1", "zabbix server address")
 	flag.IntVar(&opts.zp, "zabbix-port", 10051, "zabbix server port")
 	flag.IntVar(&opts.buf, "buffer-size", 64*1024, "read buffer size in bytes")

@@ -246,10 +246,10 @@ func TestLargeFileProcessing(t *testing.T) {
 	}
 	defer os.Remove(tmpPos.Name())
 
-	// Генерируем большой файл (10010 строк)
+	// Генерируем большой файл
 	var builder strings.Builder
-	for i := range 10010 {
-		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d\n", i, i%256, i))
+	for i := range 20011 {
+		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd acbd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd\n", i, i%256, i))
 	}
 
 	if _, err := tmpLog.WriteString(builder.String()); err != nil {
@@ -259,10 +259,14 @@ func TestLargeFileProcessing(t *testing.T) {
 	// Устанавливаем тестовые параметры
 	opts.ln = tmpLog.Name()
 	opts.pn = tmpPos.Name()
-	opts.batch = 101 // Обрабатываем по 100 строк за раз
+	opts.batch = 100 // Обрабатываем по 100 строк за раз
 
 	if err := magic(); err != nil {
 		t.Errorf("magic() with large file error = %v", err)
+	}
+
+	if err := magic(); err != nil {
+		t.Errorf("second magic() with large file error = %v", err)
 	}
 }
 
