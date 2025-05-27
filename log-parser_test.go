@@ -1,18 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/kolunchik/zs"
 )
 
-// TestLine проверяет пример строки лога
 func TestLine(t *testing.T) {
 	expected := "2023-04-11T08:57:01.058999+03:00 10.77.2.11 %OLT: Interface EPON0/1:18's \"CTC\" OAM extension negotiated \n successfully!"
 	if line() != expected {
@@ -20,7 +21,6 @@ func TestLine(t *testing.T) {
 	}
 }
 
-// TestValidateLogLine проверяет валидацию строк лога
 func TestValidateLogLine(t *testing.T) {
 	tests := []struct {
 		name string
@@ -74,7 +74,6 @@ func TestValidateLogLine(t *testing.T) {
 	}
 }
 
-// TestParseLogLine проверяет парсинг строк лога
 func TestParseLogLine(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -100,7 +99,6 @@ func TestParseLogLine(t *testing.T) {
 		},
 	}
 
-	// Сохраняем и восстанавливаем значение opts.key
 	oldKey := opts.key
 	opts.key = "test.key"
 	defer func() { opts.key = oldKey }()
@@ -119,7 +117,250 @@ func TestParseLogLine(t *testing.T) {
 	}
 }
 
-// TestProcessLogFile проверяет обработку лог-файла
+func TestProcessLogFileErrorCases(t *testing.T) {
+	// Тест на обработку ошибок сканера
+	t.Run("scanner error", func(t *testing.T) {
+		p := &parser{file: &os.File{}}
+		err := processLogFile(p.file)
+		if err == nil {
+			t.Error("expected error for invalid file")
+		}
+	})
+}
+
+func TestRestorePositionErrors(t *testing.T) {
+	t.Run("invalid position file format", func(t *testing.T) {
+		tmpLog, err := os.CreateTemp("", "testlog")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpLog.Name())
+
+		tmpPos, err := os.CreateTemp("", "testpos")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpPos.Name())
+
+		// Пишем неверный формат в файл позиции
+		tmpPos.WriteString("invalid data")
+		tmpPos.Seek(0, 0)
+
+		p := &parser{
+			pos: tmpPos,
+			ln:  tmpLog.Name(),
+		}
+
+		// Открываем файл лога
+		if err := p.OpenLogFile(); err != nil {
+			t.Fatalf("OpenLogFile failed: %v", err)
+		}
+		defer p.file.Close()
+
+		err = p.RestorePosition()
+		if err != nil {
+			t.Errorf("expected to handle invalid format, got %v", err)
+		}
+	})
+
+	t.Run("nil file", func(t *testing.T) {
+		p := &parser{}
+		err := p.RestorePosition()
+		if err == nil {
+			t.Error("expected error for nil file")
+		} else if !strings.Contains(err.Error(), "Failed to get log file stats") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("nil position file", func(t *testing.T) {
+		tmpLog, err := os.CreateTemp("", "testlog")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpLog.Name())
+
+		p := &parser{
+			file: tmpLog,
+			ln:   tmpLog.Name(),
+		}
+		err = p.RestorePosition()
+		if err == nil {
+			t.Error("expected error for nil position file")
+		} else if !strings.Contains(err.Error(), "Failed to seek position file") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestFileOperationsErrors(t *testing.T) {
+	t.Run("open log file error", func(t *testing.T) {
+		p := NewParser("/nonexistent/file", "")
+		err := p.OpenLogFile()
+		if err == nil {
+			t.Error("expected error for nonexistent file")
+		}
+	})
+
+	t.Run("open position file error", func(t *testing.T) {
+		p := NewParser("", "/invalid/path/to/position")
+		err := p.OpenPositionFile()
+		if err == nil {
+			t.Error("expected error for invalid position file path")
+		}
+	})
+}
+
+func TestConcurrentHUP(t *testing.T) {
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	oldLn := opts.ln
+	oldPn := opts.pn
+	oldBuf := opts.buf
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	opts.buf = 64 * 1024
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+		opts.buf = oldBuf
+	}()
+
+	p := NewParser(opts.ln, opts.pn)
+	if err := p.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	defer p.Close()
+
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.hup = true
+			if err := p.RotateLogFile(); err != nil {
+				t.Errorf("RotateLogFile() failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestParserMethods(t *testing.T) {
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	testContent := "2023-04-11T08:57:01.058999+03:00 10.77.2.11 test message\n"
+	if _, err := tmpLog.WriteString(testContent); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLn := opts.ln
+	oldPn := opts.pn
+	oldBuf := opts.buf
+	oldZs := opts.zs
+	oldZp := opts.zp
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	opts.buf = 64 * 1024
+	opts.zs = "127.0.0.1"
+	opts.zp = 10051
+	defer func() { opts.ln = oldLn; opts.pn = oldPn; opts.buf = oldBuf; opts.zs = oldZs; opts.zp = oldZp }()
+
+	p := NewParser(opts.ln, opts.pn)
+
+	if err := p.OpenLogFile(); err != nil {
+		t.Errorf("OpenLogFile() error = %v", err)
+	}
+
+	if err := p.OpenPositionFile(); err != nil {
+		t.Errorf("OpenPositionFile() error = %v", err)
+	}
+
+	if err := p.RestorePosition(); err != nil {
+		t.Errorf("RestorePosition() error = %v", err)
+	}
+
+	if err := p.Magic(); err != nil {
+		t.Errorf("Magic() error = %v", err)
+	}
+
+	if err := p.SavePositionFile(); err != nil {
+		t.Errorf("SavePositionFile() error = %v", err)
+	}
+
+	posData, err := os.ReadFile(opts.pn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posData) == 0 {
+		t.Error("position file is empty after SavePositionFile")
+	}
+
+	if err := p.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+}
+
+func TestInit(t *testing.T) {
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	oldLn := opts.ln
+	oldPn := opts.pn
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+	}()
+
+	p := NewParser(opts.ln, opts.pn)
+
+	if err := p.Init(); err != nil {
+		t.Errorf("Init() error = %v", err)
+	}
+
+	if p.file == nil {
+		t.Error("log file not opened after Init")
+	}
+	if p.pos == nil {
+		t.Error("position file not opened after Init")
+	}
+
+	if err := p.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+}
+
 func TestProcessLogFile(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -147,7 +388,6 @@ invalid line
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Создаем временный файл с тестовыми логами
 			tmpfile, err := os.CreateTemp("", "testlog")
 			if err != nil {
 				t.Fatal(err)
@@ -161,15 +401,20 @@ invalid line
 				t.Fatal(err)
 			}
 
-			// Сохраняем и восстанавливаем значение opts.batch
 			oldBatch := opts.batch
-			opts.batch = 1 // Уменьшаем batch для тестирования отправки
-			opts.buf = 1000
+			oldBuf := opts.buf
+			oldZs := opts.zs
+			oldZp := opts.zp
+			opts.batch = 1
+			opts.buf = 64 * 1024
 			opts.zs = "127.0.0.1"
 			opts.zp = 10051
-			defer func() { opts.batch = oldBatch }()
+			defer func() { opts.batch = oldBatch; opts.buf = oldBuf; opts.zs = oldZs; opts.zp = oldZp }()
 
-			err = processLogFile(tmpfile)
+			p := NewParser(tmpfile.Name(), "")
+			p.file = tmpfile
+
+			err = processLogFile(p.file)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("processLogFile() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -177,7 +422,6 @@ invalid line
 	}
 }
 
-// TestSendData проверяет отправку данных
 func TestSendData(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -198,7 +442,6 @@ func TestSendData(t *testing.T) {
 		},
 	}
 
-	// Сохраняем оригинальные значения
 	oldZS := opts.zs
 	oldZP := opts.zp
 	defer func() {
@@ -206,7 +449,6 @@ func TestSendData(t *testing.T) {
 		opts.zp = oldZP
 	}()
 
-	// Настраиваем тестовый сервер
 	opts.zs = "127.0.0.1"
 	opts.zp = 10051
 
@@ -220,20 +462,7 @@ func TestSendData(t *testing.T) {
 	}
 }
 
-// TestLargeFileProcessing проверяет обработку больших файлов
 func TestLargeFileProcessing(t *testing.T) {
-	parseFlags()
-	// Сохраняем оригинальные значения
-	oldLn := opts.ln
-	oldPn := opts.pn
-	oldBatch := opts.batch
-	defer func() {
-		opts.ln = oldLn
-		opts.pn = oldPn
-		opts.batch = oldBatch
-	}()
-
-	// Создаем временные файлы
 	tmpLog, err := os.CreateTemp("", "testlog")
 	if err != nil {
 		t.Fatal(err)
@@ -246,40 +475,149 @@ func TestLargeFileProcessing(t *testing.T) {
 	}
 	defer os.Remove(tmpPos.Name())
 
-	// Генерируем большой файл
 	var builder strings.Builder
 	for i := range 20011 {
-		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd acbd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd\n", i, i%256, i))
+		builder.WriteString(fmt.Sprintf("2023-04-11T08:57:01.%06d+03:00 10.77.2.%d test message %d\n", i, i%256, i))
 	}
 
 	if _, err := tmpLog.WriteString(builder.String()); err != nil {
 		t.Fatal(err)
 	}
 
-	// Устанавливаем тестовые параметры
-	opts.ln = tmpLog.Name()
-	opts.pn = tmpPos.Name()
-	opts.batch = 100 // Обрабатываем по 100 строк за раз
-
-	if err := magic(); err != nil {
-		t.Errorf("magic() with large file error = %v", err)
-	}
-
-	if err := magic(); err != nil {
-		t.Errorf("second magic() with large file error = %v", err)
-	}
-}
-
-// TestMagicErrorCases проверяет обработку ошибок в magic()
-func TestMagicErrorCases(t *testing.T) {
-	// Сохраняем оригинальные значения
 	oldLn := opts.ln
 	oldPn := opts.pn
+	oldBatch := opts.batch
+	oldBuf := opts.buf
+	oldZs := opts.zs
+	oldZp := opts.zp
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	opts.batch = 100
+	opts.buf = 64 * 1024
+	opts.zs = "127.0.0.1"
+	opts.zp = 10051
 	defer func() {
 		opts.ln = oldLn
 		opts.pn = oldPn
+		opts.batch = oldBatch
+		opts.buf = oldBuf
+		opts.zs = oldZs
+		opts.zp = oldZp
 	}()
 
+	p := NewParser(opts.ln, opts.pn)
+	if err := p.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	defer p.Close()
+
+	if err := p.Magic(); err != nil {
+		t.Errorf("Magic() first run error = %v", err)
+	}
+
+	if err := p.Magic(); err != nil {
+		t.Errorf("Magic() second run error = %v", err)
+	}
+
+	if err := p.SavePositionFile(); err != nil {
+		t.Errorf("SavePositionFile() error = %v", err)
+	}
+}
+
+func TestScheduledMagic(t *testing.T) {
+	oldInterval := opts.interval
+	opts.interval = time.Millisecond * 100
+	defer func() { opts.interval = oldInterval }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	counter := 0
+	f := func() {
+		counter++
+		if counter >= 3 {
+			panic("stop")
+		}
+	}
+
+	defer func() {
+		if r := recover(); r != nil && r.(string) == "stop" {
+			if counter != 3 {
+				t.Errorf("scheduledMagic() ran %d times, want 3", counter)
+			}
+		}
+	}()
+
+	scheduledMagic(ctx, f)
+}
+
+func TestParserConcurrent(t *testing.T) {
+	tmpLog, err := os.CreateTemp("", "concurrent_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+
+	tmpPos, err := os.CreateTemp("", "concurrent_pos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
+	l, _ := tmpLog.WriteString("2023-01-01T00:00:00Z 127.0.0.1 test\n")
+
+	oldLn := opts.ln
+	oldPn := opts.pn
+	oldBuf := opts.buf
+	oldZs := opts.zs
+	oldZp := opts.zp
+	opts.ln = tmpLog.Name()
+	opts.pn = tmpPos.Name()
+	opts.buf = 64 * 1024
+	opts.zs = "127.0.0.1"
+	opts.zp = 10051
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+		opts.buf = oldBuf
+		opts.zs = oldZs
+		opts.zp = oldZp
+	}()
+
+	p := NewParser(opts.ln, opts.pn)
+	if err := p.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	defer p.Close()
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := p.Magic(); err != nil {
+				t.Errorf("Magic() failed: %v", err)
+			}
+			if err := p.SavePositionFile(); err != nil {
+				t.Errorf("SavePositionFile() failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	posData, err := os.ReadFile(opts.pn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posData) == 0 {
+		t.Error("position file is empty after concurrent access")
+	}
+	s := strings.Split(string(posData), " ")
+	if fmt.Sprintf("%d", l) != fmt.Sprintf("%s", s[0]) {
+		t.Errorf("position incorrect, want %v, got %v", l, s[0])
+	}
+}
+
+func TestErrorCases(t *testing.T) {
 	tests := []struct {
 		name    string
 		logPath string
@@ -301,34 +639,39 @@ func TestMagicErrorCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			oldLn := opts.ln
+			oldPn := opts.pn
 			opts.ln = tt.logPath
 			if tt.posPath != "" {
 				opts.pn = tt.posPath
 			}
+			defer func() {
+				opts.ln = oldLn
+				opts.pn = oldPn
+			}()
 
-			if err := magic(); (err != nil) != tt.wantErr {
-				t.Errorf("magic() error = %v, wantErr %v", err, tt.wantErr)
+			p := NewParser(opts.ln, opts.pn)
+			err := p.Init()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Init() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-// TestMagicFileOperations проверяет работу с файлами в magic()
-func TestMagicFileOperations(t *testing.T) {
-	// Сохраняем оригинальные значения
-	oldLn := opts.ln
-	oldPn := opts.pn
-	defer func() {
-		opts.ln = oldLn
-		opts.pn = oldPn
-	}()
-
-	// Создаем временные файлы
+func TestRotateLogFile(t *testing.T) {
 	tmpLog, err := os.CreateTemp("", "testlog")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(tmpLog.Name())
+	l, _ := tmpLog.WriteString("2023-01-01T00:00:00Z 127.0.0.1 test\n")
+	tmpLogNew, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLogNew.Name())
+	ln, _ := tmpLogNew.WriteString("2023-01-01T00:00:00Z 127.0.0.1 test test\n2023-01-01T00:00:00Z 127.0.0.1 test test\n")
 
 	tmpPos, err := os.CreateTemp("", "testpos")
 	if err != nil {
@@ -336,101 +679,118 @@ func TestMagicFileOperations(t *testing.T) {
 	}
 	defer os.Remove(tmpPos.Name())
 
-	// Записываем тестовые данные
-	testContent := "2023-04-11T08:57:01.058999+03:00 10.77.2.11 test message\n"
-	if _, err := tmpLog.WriteString(testContent); err != nil {
-		t.Fatal(err)
-	}
-
-	// Устанавливаем тестовые пути
+	oldLn := opts.ln
+	oldPn := opts.pn
+	oldBatch := opts.batch
+	oldBuf := opts.buf
+	oldZs := opts.zs
+	oldZp := opts.zp
 	opts.ln = tmpLog.Name()
 	opts.pn = tmpPos.Name()
-
-	// Первый запуск - должен обработать весь файл
-	if err := magic(); err != nil {
-		t.Errorf("magic() first run error = %v", err)
-	}
-
-	// Проверяем содержимое позиционного файла
-	posContent, err := os.ReadFile(tmpPos.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(posContent) == 0 {
-		t.Error("position file is empty after magic()")
-	}
-
-	// Второй запуск - не должен ничего обрабатывать (файл не изменился)
-	if err := magic(); err != nil {
-		t.Errorf("magic() second run error = %v", err)
-	}
-}
-
-// TestScheduledMagic проверяет работу планировщика
-func TestScheduledMagic(t *testing.T) {
-	oldInterval := opts.interval
-	defer func() { opts.interval = oldInterval }()
-
-	opts.interval = time.Millisecond * 100
-	counter := 0
-	f := func() {
-		counter++
-		if counter >= 3 {
-			panic("stop") // Это остановит тест после 3 итераций
-		}
-	}
-
+	opts.batch = 100
+	opts.buf = 64 * 1024
+	opts.zs = "127.0.0.1"
+	opts.zp = 10051
 	defer func() {
-		if r := recover(); r != nil && r.(string) == "stop" {
-			if counter != 3 {
-				t.Errorf("scheduledMagic() ran %d times, want 3", counter)
-			}
-		}
+		opts.ln = oldLn
+		opts.pn = oldPn
+		opts.batch = oldBatch
+		opts.buf = oldBuf
+		opts.zs = oldZs
+		opts.zp = oldZp
 	}()
 
-	scheduledMagic(f)
-}
-
-func TestMagicConcurrent(t *testing.T) {
-	tmpLog, err := os.CreateTemp("", "concurrent_test")
+	p := NewParser(opts.ln, opts.pn)
+	if err := p.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	defer p.Close()
+	p.Magic()
+	p.SavePositionFile()
+	p.ln = tmpLogNew.Name()
+	rotated, err := p.CheckRotation()
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("CheckRotation() error = %v", err)
 	}
-	defer os.Remove(tmpLog.Name())
-
-	tmpPos, err := os.CreateTemp("", "concurrent_pos")
-	if err != nil {
-		t.Fatal(err)
+	if !rotated {
+		t.Error("CheckRotation() failed, got false, need true")
 	}
-	defer os.Remove(tmpPos.Name())
-
-	// Пишем тестовые данные
-	_, _ = tmpLog.WriteString("2023-01-01T00:00:00Z 127.0.0.1 test\n")
-
-	// Подменяем глобальные настройки
-	oldLn, oldPn := opts.ln, opts.pn
-	opts.ln, opts.pn = tmpLog.Name(), tmpPos.Name()
-	defer func() { opts.ln, opts.pn = oldLn, oldPn }()
-
-	// Запускаем 10 горутин
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := magic(); err != nil {
-				t.Errorf("magic() failed: %v", err)
-			}
-		}()
+	if err := p.RotateLogFile(); err != nil {
+		t.Errorf("RotateLogFile() error = %v", err)
 	}
-	wg.Wait()
-
-	// Проверяем, что позиция записана корректно
-	posData, err := os.ReadFile(tmpPos.Name())
+	posData, err := os.ReadFile(opts.pn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(posData) == 0 {
-		t.Error("position file is empty after concurrent access")
+		t.Error("position file is empty")
 	}
+	s := strings.Split(string(posData), " ")
+	if fmt.Sprintf("%d", l) != fmt.Sprintf("%s", s[0]) {
+		t.Errorf("position incorrect, want %v, got %v", l, s[0])
+	}
+	p.Magic()
+	p.SavePositionFile()
+	posDataN, err := os.ReadFile(opts.pn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posDataN) == 0 {
+		t.Error("position file is empty")
+	}
+	sN := strings.Split(string(posDataN), " ")
+	if fmt.Sprintf("%d", ln) != fmt.Sprintf("%s", sN[0]) {
+		t.Errorf("position incorrect, want %v, got %v", ln, sN[0])
+	}
+}
+
+func TestParserHUP(t *testing.T) {
+	p := NewParser("", "")
+	if p.hup {
+		t.Error("NewParser should set hup to false by default")
+	}
+}
+
+func TestMainSignalHandling(t *testing.T) {
+	// Тест можно запускать только с флагом -short
+	//if !testing.Short() {
+	//	t.Skip("skipping test in normal mode")
+	//}
+
+	oldLn := opts.ln
+	oldPn := opts.pn
+	opts.ln = os.DevNull
+	opts.pn = os.DevNull
+	defer func() {
+		opts.ln = oldLn
+		opts.pn = oldPn
+	}()
+
+	// Запускаем main в отдельной goroutine
+	go main()
+
+	// Даем время на инициализацию
+	time.Sleep(100 * time.Millisecond)
+
+	// Посылаем сигналы
+	proc, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Тестируем SIGHUP
+	if err := proc.Signal(syscall.SIGHUP); err != nil {
+		t.Errorf("SIGHUP failed: %v", err)
+	}
+
+	// Даем время на обработку
+	time.Sleep(100 * time.Millisecond)
+
+	// Тестируем SIGTERM
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		t.Errorf("SIGTERM failed: %v", err)
+	}
+
+	// Даем время на завершение
+	time.Sleep(100 * time.Millisecond)
 }
