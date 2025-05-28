@@ -547,7 +547,7 @@ func TestScheduledMagic(t *testing.T) {
 		}
 	}()
 
-	scheduledMagic(ctx, f)
+	scheduledMagic(ctx, opts.interval, f)
 }
 
 func TestParserConcurrent(t *testing.T) {

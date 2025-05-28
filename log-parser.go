@@ -67,15 +67,15 @@ func (p *parser) OpenLogFile() error {
 	var err error
 	if p.file != nil {
 		if err := processLogFile(p.file); err != nil {
-			return fmt.Errorf("processLogFile(): %w", err)
+			return fmt.Errorf("OpenLogFile(): %w", err)
 		}
 		if err := p.file.Close(); err != nil {
-			return fmt.Errorf("close log file: %w", err)
+			return fmt.Errorf("OpenLogFile() close log file: %w", err)
 		}
 	}
 	p.file, err = os.Open(p.ln)
 	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
+		return fmt.Errorf("OpenLogFile() open log file: %w", err)
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ func (p *parser) OpenLogFile() error {
 func (p *parser) RotateLogFile() error {
 	rotated, err := p.IsRotated()
 	if err != nil {
-		return fmt.Errorf("IsRotated(): %w", err)
+		return fmt.Errorf("RotateLogFile(): %w", err)
 	}
 	if !rotated {
 		return nil
@@ -97,7 +97,7 @@ func (p *parser) OpenPositionFile() error {
 	var err error
 	p.pos, err = os.OpenFile(p.pn, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return fmt.Errorf("open position file: %w", err)
+		return fmt.Errorf("OpenPositionFile() open position file: %w", err)
 	}
 	return nil
 }
@@ -107,23 +107,23 @@ func (p *parser) SavePositionFile() error {
 	defer p.lock.Unlock()
 	logStat, err := p.file.Stat()
 	if err != nil {
-		return fmt.Errorf("stat log file: %w", err)
+		return fmt.Errorf("SavePositionFile() stat log file: %w", err)
 	}
 	position, err := p.file.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return fmt.Errorf("seek log file: %w", err)
+		return fmt.Errorf("SavePositionFile() seek log file: %w", err)
 	}
 	if err := p.pos.Truncate(0); err != nil {
-		return fmt.Errorf("truncate position file: %w", err)
+		return fmt.Errorf("SavePositionFile() truncate position file: %w", err)
 	}
 	if _, err := p.pos.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("seek position file: %w", err)
+		return fmt.Errorf("SavePositionFile() seek position file: %w", err)
 	}
 	if _, err := fmt.Fprintf(p.pos, "%v %v", position, logStat.ModTime().UnixNano()); err != nil {
-		return fmt.Errorf("write position file: %w", err)
+		return fmt.Errorf("SavePositionFile() write position file: %w", err)
 	}
 	if err := p.pos.Sync(); err != nil {
-		return fmt.Errorf("sync position file: %w", err)
+		return fmt.Errorf("SavePositionFile() sync position file: %w", err)
 	}
 	log.Printf("New position saved: %d", position)
 	return nil
@@ -134,17 +134,17 @@ func (p *parser) RestorePosition() error {
 	defer p.lock.Unlock()
 	logStat, err := p.file.Stat()
 	if err != nil {
-		return fmt.Errorf("stat log file: %w", err)
+		return fmt.Errorf("RestorePosition() stat log file: %w", err)
 	}
 	var position, ts int64
 	if _, err := p.pos.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("seek position file: %w", err)
+		return fmt.Errorf("RestorePosition() seek position file: %w", err)
 	}
 	if q, err := fmt.Fscanf(p.pos, "%v %v", &position, &ts); err != nil || position > logStat.Size() || q != 2 {
 		position = 0
 	}
 	if _, err = p.file.Seek(position, io.SeekStart); err != nil {
-		return fmt.Errorf("seek log file: %w", err)
+		return fmt.Errorf("RestorePosition() seek log file: %w", err)
 	}
 	log.Printf("Position %v, logfile size %v, date %v", position, logStat.Size(), logStat.ModTime())
 	return nil
@@ -155,19 +155,19 @@ func (p *parser) IsRotated() (bool, error) {
 	defer p.lock.Unlock()
 	logStat, err := p.file.Stat()
 	if err != nil {
-		return false, fmt.Errorf("stat log file: %w", err)
+		return false, fmt.Errorf("IsRotated() stat current log file: %w", err)
 	}
 	fileN, err := os.Open(p.ln)
 	if err != nil {
-		return false, fmt.Errorf("open new log file: %w", err)
+		return false, fmt.Errorf("IsRotated() open new log file: %w", err)
 	}
 	defer fileN.Close()
 	nStat, err := fileN.Stat()
 	if err != nil {
-		return false, fmt.Errorf("stat new log file: %w", err)
+		return false, fmt.Errorf("IsRotated() stat new log file: %w", err)
 	}
 	result := !os.SameFile(logStat, nStat)
-	k := map[bool]string{true: "files are different", false: "they are the same file"}
+	k := map[bool]string{true: "different files", false: "same file"}
 	log.Printf("Current log file size: %v, new log file size: %v, %v", logStat.Size(), nStat.Size(), k[result])
 	return result, nil
 }
@@ -176,20 +176,20 @@ func (p *parser) Magic() error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := processLogFile(p.file); err != nil {
-		return fmt.Errorf("processLogFile(): %w", err)
+		return fmt.Errorf("Magic(): %w", err)
 	}
 	return nil
 }
 
 func (p *parser) Init() error {
 	if err := p.OpenLogFile(); err != nil {
-		return fmt.Errorf("OpenLogFile(): %w", err)
+		return fmt.Errorf("Init(): %w", err)
 	}
 	if err := p.OpenPositionFile(); err != nil {
-		return fmt.Errorf("OpenPositionFile(): %w", err)
+		return fmt.Errorf("Init(): %w", err)
 	}
 	if err := p.RestorePosition(); err != nil {
-		return fmt.Errorf("RestorePosition(): %w", err)
+		return fmt.Errorf("Init(): %w", err)
 	}
 	return nil
 }
@@ -198,10 +198,10 @@ func (p *parser) Close() error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := p.file.Close(); err != nil {
-		return fmt.Errorf("close log file: %w", err)
+		return fmt.Errorf("Close() close log file: %w", err)
 	}
 	if err := p.pos.Close(); err != nil {
-		return fmt.Errorf("close position file: %w", err)
+		return fmt.Errorf("Close() close position file: %w", err)
 	}
 	return nil
 }
@@ -213,6 +213,9 @@ func sendData(data *[]zs.ZabbixDataItem) error {
 	sender := zs.NewSender(opts.zs, opts.zp)
 	resp, err := sender.Send(*data)
 	log.Println("Zabbix response:", resp)
+	if err != nil {
+		err = fmt.Errorf("sendData(): %w", err)
+	}
 	return err
 }
 
@@ -232,7 +235,7 @@ func validateLogLine(parsed *[]string) bool {
 func parseLogLine(line string) (zs.ZabbixDataItem, error) {
 	parsed := strings.SplitN(line, " ", 3)
 	if !validateLogLine(&parsed) {
-		return zs.ZabbixDataItem{}, fmt.Errorf("invalid log format: %q", line)
+		return zs.ZabbixDataItem{}, fmt.Errorf("parseLogLine(): invalid log format: %q", line)
 	}
 	return zs.ZabbixDataItem{
 		Host:  parsed[1],
@@ -260,19 +263,19 @@ func processLogFile(logfile *os.File) error {
 		linesProcessed++
 		if len(data) >= opts.batch {
 			if err := sendData(&data); err != nil {
-				return fmt.Errorf("sendData(): %w", err)
+				return fmt.Errorf("processLogFile() on main data part: %w", err)
 			}
 			data = data[:0] // очищаем слайс, сохраняя capacity
 		}
 	}
 	if len(data) > 0 {
 		if err := sendData(&data); err != nil {
-			return fmt.Errorf("sendData() on remaining data part: %w", err)
+			return fmt.Errorf("processLogFile() on remaining data part: %w", err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scanner error: %w", err)
+		return fmt.Errorf("processLogFile() scanner error: %w", err)
 	}
 
 	if linesProcessed > 0 {
@@ -281,12 +284,12 @@ func processLogFile(logfile *os.File) error {
 	return nil
 }
 
-func scheduledMagic(ctx context.Context, f func()) {
+func scheduledMagic(ctx context.Context, interval time.Duration, f func()) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(opts.interval):
+		case <-time.Tick(interval):
 			f()
 		}
 	}
@@ -302,38 +305,43 @@ func main() {
 	signal.Notify(hup, syscall.SIGHUP)
 	ex := make(chan os.Signal, 1)
 	signal.Notify(ex, syscall.SIGTERM, syscall.SIGINT)
-	ctx, cancel := context.WithCancel(context.Background())
-	f := func() {
-		if err := p.Magic(); err != nil {
-			log.Fatal(err)
+	/*
+		go func() {
+			for range time.Tick(10 * time.Minute) {
+				hup <- syscall.SIGHUP
+			}
+		}()
+	*/
+ops:
+	for {
+		select {
+		case <-time.Tick(opts.interval):
+			{
+				if err := p.Magic(); err != nil {
+					log.Fatal(err)
+				}
+			}
+		case <-hup:
+			{
+				time.Sleep(100 * time.Millisecond) // не торопимся
+				if err := p.RotateLogFile(); err != nil {
+					log.Printf("main(): %v", err)
+				}
+				if err := p.SavePositionFile(); err != nil {
+					log.Printf("main(): %v", err)
+				}
+			}
+		case <-ex:
+			{
+				if err := p.SavePositionFile(); err != nil {
+					log.Fatal(err)
+				}
+				if err := p.Close(); err != nil {
+					log.Fatal(err)
+				}
+				break ops
+			}
 		}
 	}
-	f()
-	go scheduledMagic(ctx, f)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ex
-		cancel()
-		if err := p.SavePositionFile(); err != nil {
-			log.Fatal(err)
-		}
-		if err := p.Close(); err != nil {
-			log.Fatal(err)
-		}
-	}()
-	go func() {
-		for {
-			<-hup
-			time.Sleep(100 * time.Millisecond) // не торопимся
-			if err := p.RotateLogFile(); err != nil {
-				log.Printf("RotateLogFile(): %v", err)
-			}
-			if err := p.SavePositionFile(); err != nil {
-				log.Printf("SavePositionFile(): %v", err)
-			}
-		}
-	}()
-	wg.Wait()
+	log.Println("Have a good day")
 }
