@@ -168,7 +168,7 @@ func TestRestorePositionErrors(t *testing.T) {
 		err := p.RestorePosition()
 		if err == nil {
 			t.Error("expected error for nil file")
-		} else if !strings.Contains(err.Error(), "Failed to get log file stats") {
+		} else if !strings.Contains(err.Error(), "stat log file") {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -187,7 +187,7 @@ func TestRestorePositionErrors(t *testing.T) {
 		err = p.RestorePosition()
 		if err == nil {
 			t.Error("expected error for nil position file")
-		} else if !strings.Contains(err.Error(), "Failed to seek position file") {
+		} else if !strings.Contains(err.Error(), "seek position file") {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
@@ -707,13 +707,21 @@ func TestRotateLogFile(t *testing.T) {
 	defer p.Close()
 	p.Magic()
 	p.SavePositionFile()
+	p.ln = tmpLogNew.Name() + " fake"
+	rotated, err := p.IsRotated()
+	if err == nil {
+		t.Errorf("IsRotated() error = %v", err)
+	}
+	if rotated {
+		t.Error("IsRotated() failed, got true, need false")
+	}
 	p.ln = tmpLogNew.Name()
-	rotated, err := p.CheckRotation()
+	rotated, err = p.IsRotated()
 	if err != nil {
-		t.Errorf("CheckRotation() error = %v", err)
+		t.Errorf("IsRotated() error = %v", err)
 	}
 	if !rotated {
-		t.Error("CheckRotation() failed, got false, need true")
+		t.Error("IsRotated() failed, got false, need true")
 	}
 	if err := p.RotateLogFile(); err != nil {
 		t.Errorf("RotateLogFile() error = %v", err)

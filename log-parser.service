@@ -6,7 +6,10 @@ After=network.target auditd.service
 Type=simple
 Restart=always
 RestartSec=5
-ExecStart=/opt/log-parser -interval 30s
+User=webproxy
+Group=webproxy
+ExecStart=/opt/log-parser
+ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target
