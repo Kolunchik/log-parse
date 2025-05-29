@@ -1,0 +1,61 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*' # Триггер на теги, начинающиеся с 'v'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable'
+
+      - name: Run tests
+        run: go test -v ./...
+        
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 'stable' # Укажите нужную версию Go
+
+      - name: Get tag version
+        id: get_tag
+        run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build for Linux (amd64)
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X main.commit=${{ env.TAG_VERSION }}" -o log-parser-amd64 .
+          tar czf log-parser-${{ env.TAG_VERSION }}.linux-amd64.tar.gz log-parser-amd64
+
+      - name: Build for Linux (386)
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags="-X main.commit=${{ env.TAG_VERSION }}" -o log-parser-386 .
+          tar czf log-parser-${{ env.TAG_VERSION }}.linux-386.tar.gz log-parser-386
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            log-parser-${{ env.TAG_VERSION }}.linux-amd64.tar.gz
+            log-parser-${{ env.TAG_VERSION }}.linux-386.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
