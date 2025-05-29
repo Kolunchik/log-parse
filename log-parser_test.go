@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -13,6 +19,86 @@ import (
 
 	"github.com/kolunchik/zs"
 )
+
+type ZabbixResponse struct {
+	Response    string `json:"response"`
+	Info        string `json:"info"`
+	Processed   int    `json:"processed"`
+	Failed      int    `json:"failed"`
+	Total       int    `json:"total"`
+	SpentMillis int    `json:"spent_millis"`
+}
+
+const (
+	zabbixHeader      = "ZBXD"
+	zabbixVersion     = 1
+	defaultTimeout    = 5 * time.Second
+	defaultRetries    = 3
+	defaultRetryDelay = 1 * time.Second
+)
+
+var (
+	ErrIncompleteHeader       = errors.New("incomplete header received")
+	ErrInvalidProtocolVersion = errors.New("invalid protocol version")
+	ErrDataLengthMismatch     = errors.New("data length mismatch")
+	ErrEmptyData              = errors.New("empty data")
+	ErrInvalidJSON            = errors.New("invalid JSON")
+	ErrConnectionClosed       = errors.New("connection closed by server")
+	ErrResponseStatus         = errors.New("zabbix response error")
+)
+
+func buildPacket(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, ErrEmptyData
+	}
+
+	buffer := new(bytes.Buffer)
+	buffer.Write([]byte(zabbixHeader))
+	buffer.WriteByte(zabbixVersion)
+	binary.Write(buffer, binary.LittleEndian, uint64(len(data)))
+	buffer.Write(data)
+
+	return buffer.Bytes(), nil
+}
+
+func startTestServer(handler func(net.Conn)) (net.Listener, int) {
+	listener, err := net.Listen("tcp", "127.0.0.1:10051")
+	if err != nil {
+		if _, ok := err.(net.Error); !ok {
+			log.Fatal(err)
+		}
+		log.Println("startTestServer():", err)
+		return nil, 0
+	}
+
+	go func() {
+		defer listener.Close()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go handler(conn)
+		}
+	}()
+
+	return listener, listener.Addr().(*net.TCPAddr).Port
+}
+
+func sendSuccessResponse(conn net.Conn) {
+	response := ZabbixResponse{
+		Response:  "success",
+		Processed: 1,
+		Info:      "Processed 1 Failed 0 Total 1",
+	}
+	jsonData, _ := json.Marshal(response)
+	packet, _ := buildPacket(jsonData)
+	conn.Write(packet)
+}
+
+var server, port = startTestServer(func(conn net.Conn) {
+	sendSuccessResponse(conn)
+})
 
 func TestLine(t *testing.T) {
 	expected := "2023-04-11T08:57:01.058999+03:00 10.77.2.11 %OLT: Interface EPON0/1:18's \"CTC\" OAM extension negotiated \n successfully!"
