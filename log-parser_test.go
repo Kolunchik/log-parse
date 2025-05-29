@@ -765,6 +765,17 @@ func TestMainSignalHandling(t *testing.T) {
 	//	t.Skip("skipping test in normal mode")
 	//}
 
+	tmpLog, err := os.CreateTemp("", "testlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpLog.Name())
+	tmpPos, err := os.CreateTemp("", "testpos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpPos.Name())
+
 	oldLn := opts.ln
 	oldPn := opts.pn
 	opts.ln = os.DevNull
@@ -773,6 +784,8 @@ func TestMainSignalHandling(t *testing.T) {
 		opts.ln = oldLn
 		opts.pn = oldPn
 	}()
+
+	os.Args = append(os.Args, "-logfile", tmpLog.Name(), "-posfile", tmpPos.Name())
 
 	// Запускаем main в отдельной goroutine
 	go main()
