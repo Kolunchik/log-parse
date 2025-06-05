@@ -46,12 +46,10 @@ func parseFlags() {
 }
 
 type parser struct {
-	lock sync.Mutex
-	file *os.File
-	ln   string
-	pos  *os.File
-	pn   string
-	hup  bool
+	lock      sync.Mutex
+	file, pos *os.File
+	ln, pn    string
+	ready     bool
 }
 
 func NewParser(ln, pn string) *parser {
@@ -191,6 +189,7 @@ func (p *parser) Init() error {
 	if err := p.RestorePosition(); err != nil {
 		return fmt.Errorf("Init(): %w", err)
 	}
+	p.ready = true
 	return nil
 }
 
@@ -295,7 +294,10 @@ func scheduledMagic(ctx context.Context, interval time.Duration, f func()) {
 	}
 }
 
+var commit = "unknown"
+
 func main() {
+	log.Printf("Starting log-parser %s", commit)
 	parseFlags()
 	p := NewParser(opts.ln, opts.pn)
 	if err := p.Init(); err != nil {
@@ -305,13 +307,11 @@ func main() {
 	signal.Notify(hup, syscall.SIGHUP)
 	ex := make(chan os.Signal, 1)
 	signal.Notify(ex, syscall.SIGTERM, syscall.SIGINT)
-	/*
-		go func() {
-			for range time.Tick(10 * time.Minute) {
-				hup <- syscall.SIGHUP
-			}
-		}()
-	*/
+	go func() {
+		for range time.Tick(time.Hour) {
+			hup <- syscall.SIGHUP
+		}
+	}()
 ops:
 	for {
 		select {

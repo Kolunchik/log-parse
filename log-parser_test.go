@@ -105,6 +105,10 @@ func TestLine(t *testing.T) {
 	if line() != expected {
 		t.Errorf("line() returned unexpected result")
 	}
+	parsed := strings.SplitN(line(), " ", 3)
+	if !validateLogLine(&parsed) {
+		t.Errorf("line() returned invalid line")
+	}
 }
 
 func TestValidateLogLine(t *testing.T) {
@@ -333,7 +337,7 @@ func TestConcurrentHUP(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p.hup = true
+			p.ready = true
 			if err := p.RotateLogFile(); err != nil {
 				t.Errorf("RotateLogFile() failed: %v", err)
 			}
@@ -840,7 +844,7 @@ func TestRotateLogFile(t *testing.T) {
 
 func TestParserHUP(t *testing.T) {
 	p := NewParser("", "")
-	if p.hup {
+	if p.ready {
 		t.Error("NewParser should set hup to false by default")
 	}
 }

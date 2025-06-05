@@ -52,7 +52,7 @@ jobs:
           tar czf log-parser-${{ env.TAG_VERSION }}.linux-386.tar.gz log-parser-386
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             log-parser-${{ env.TAG_VERSION }}.linux-amd64.tar.gz
